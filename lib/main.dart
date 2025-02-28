@@ -480,108 +480,249 @@ class MyApp extends StatelessWidget {
         ),
         iconTheme: const IconThemeData(color: Colors.blueAccent),
       ),
-      home: VideoList(),
+      home: VideoListScreen(),
     );
   }
-}class VideoList extends StatefulWidget {
-  @override
-  _VideoListState createState() => _VideoListState();
 }
 
-class _VideoListState extends State<VideoList> {
-  final TextEditingController _controller = TextEditingController();
-  List<String> _videoPaths = [];
+class VideoListScreen extends StatefulWidget {
+  @override
+  _VideoListScreenState createState() => _VideoListScreenState();
+}
+
+class _VideoListScreenState extends State<VideoListScreen> {
+  final List<YoutubePlayerController> _controllers = [];
+  final List<String> _videoUrls = [];
 
   @override
   void initState() {
     super.initState();
-    _loadVideoPaths();
+    _loadVideos();
   }
 
-  // Load video paths from SharedPreferences
-  Future<void> _loadVideoPaths() async {
+  // Load saved video URLs from shared preferences
+  void _loadVideos() async {
     final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _videoPaths = prefs.getStringList('videoPaths') ?? [];
-    });
-  }
+    final List<String> videoUrls = prefs.getStringList('videoUrls') ?? [];
 
-  // Save video paths to SharedPreferences
-  Future<void> _saveVideoPaths() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setStringList('videoPaths', _videoPaths);
-  }
-
-  // Add a new video path
-  void _addVideoPath() {
-    final path = _controller.text.trim();
-    if (path.isNotEmpty) {
-      setState(() {
-        _videoPaths.add(path);
-      });
-      _controller.clear();
-      _saveVideoPaths();
+    for (var url in videoUrls) {
+      _addVideo(url, saveToStorage: false);
     }
   }
 
-  // Delete a video path
-  void _deleteVideoPath(int index) {
+  // Add video to the list and save the URL to shared preferences
+  void _addVideo(String url, {bool saveToStorage = true}) {
+    final videoId = YoutubePlayer.convertUrlToId(url);
+    if (videoId != null) {
+      setState(() {
+        _controllers.add(
+          YoutubePlayerController(
+            initialVideoId: videoId,
+            flags: const YoutubePlayerFlags(autoPlay: false),
+          ),
+        );
+        if (saveToStorage) {
+          _saveVideoUrl(url);
+        }
+      });
+    } else {
+      // Handle invalid URL
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Invalid YouTube URL')));
+    }
+  }
+
+  // Save the video URL to shared preferences
+  void _saveVideoUrl(String url) async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> videoUrls = prefs.getStringList('videoUrls') ?? [];
+    videoUrls.add(url);
+    await prefs.setStringList('videoUrls', videoUrls);
+  }
+
+  // Remove the video from the list and shared preferences
+  void _removeVideo(int index) async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> videoUrls = prefs.getStringList('videoUrls') ?? [];
+    videoUrls.removeAt(index); // Remove the URL from shared preferences
+    await prefs.setStringList('videoUrls', videoUrls);
+
     setState(() {
-      _videoPaths.removeAt(index);
+      _controllers.removeAt(index); // Remove the controller from the list
     });
-    _saveVideoPaths();
+  }
+
+  void _showAddVideoDialog() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        String url = '';
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(context).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                decoration: InputDecoration(
+                  labelText: 'Enter YouTube URL',
+                  border: OutlineInputBorder(),
+                ),
+                onChanged: (value) {
+                  url = value;
+                },
+              ),
+              SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _addVideo(url);
+                },
+                child: Text('Add Video'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Video List')),
-      body: Stack(
-        children: [
-          ListView.builder(
-            itemCount: _videoPaths.length,
-            itemBuilder: (context, index) {
-              return ListTile(
-                title: Text(_videoPaths[index]),
-                trailing: IconButton(
-                  icon: Icon(Icons.delete),
-                  onPressed: () => _deleteVideoPath(index),
+      backgroundColor: DefaultSelectionStyle.defaultColor,
+      appBar: AppBar(title: Text('Video List')),
+      body: ListView.separated(
+        itemCount: _controllers.length,
+        itemBuilder: (context, index) {
+          return ListTile(
+            contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            title: Stack(
+              children: [
+                YoutubePlayer(
+                  controller: _controllers[index],
+                  showVideoProgressIndicator: true,
                 ),
-              );
-            },
-          ),
-          Positioned(
-            bottom: 20,
-            left: 20,
-            right: 20,
-            child: FloatingActionButton(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (context) {
-                    return AlertDialog(
-                      title: const Text('Add Video Path'),
-                      content: TextField(
-                        controller: _controller,
-                        decoration: const InputDecoration(hintText: 'Enter video path'),
+                GestureDetector(
+                  onTap: () {
+                    debugPrint('Video Tapped');
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder:
+                            (context) => VideoPlayerScreen(
+                              videoId: _controllers[index].initialVideoId,
+                            ),
                       ),
-                      actions: [
-                        TextButton(
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            _addVideoPath();
-                          },
-                          child: const Text('Add'),
-                        ),
-                      ],
                     );
                   },
-                );
-              },
-              child: const Icon(Icons.add),
+                  child: Container(
+                    width: double.infinity,
+                    height: 200,
+                    color: Colors.transparent,
+                  ),
+                ),
+              ],
             ),
+            trailing: IconButton(
+              icon: Icon(Icons.delete),
+              onPressed: () {
+                _removeVideo(index);
+              },
+            ),
+            onTap: () {},
+          );
+        },
+        separatorBuilder: (context, index) => Divider(),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _showAddVideoDialog,
+        label: Text('Add Video'),
+        icon: Icon(Icons.add),
+      ),
+    );
+  }
+}
+
+class VideoPlayerScreen extends StatefulWidget {
+  final String videoId;
+
+  const VideoPlayerScreen({Key? key, required this.videoId}) : super(key: key);
+
+  @override
+  _VideoPlayerScreenState createState() => _VideoPlayerScreenState();
+}
+
+class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
+  late YoutubePlayerController _controller;
+  late YoutubeMetaData _videoMetaData;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = YoutubePlayerController(
+      initialVideoId: widget.videoId,
+      flags: YoutubePlayerFlags(autoPlay: true, mute: false),
+    )..addListener(listener);
+    _videoMetaData = const YoutubeMetaData();
+  }
+
+  void listener() {
+    setState(() {
+      _videoMetaData = _controller.metadata;
+    });
+  }
+
+  @override
+  void deactivate() {
+    _controller.pause();
+    super.deactivate();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(title: Text('YouTube Player')),
+      body: Column(
+        spacing: 17,
+        children: [
+          YoutubePlayer(
+            controller: _controller,
+            showVideoProgressIndicator: true,
+            onReady: () {
+              _controller.addListener(() {});
+            },
           ),
+          _text("title", _videoMetaData.title),
+          // _text("description", _videoMetaData.author),
         ],
+      ),
+    );
+  }
+
+  Widget _text(String title, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0),
+      child: Text(
+        value,
+        textDirection: TextDirection.rtl,
+        style: const TextStyle(
+          // fontWeight: FontWeight.w300,
+          color: Colors.blueAccent,
+        ),
       ),
     );
   }
